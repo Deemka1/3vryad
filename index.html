@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Match-3 с Бонусами и Рекламой</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #2c3e50; color: white; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
+        #game-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        canvas { background: #34495e; border: 2px solid #ecf0f1; border-radius: 8px; touch-action: none; }
+        .ui-panel { margin: 10px; font-size: 20px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #e67e22; border: none; color: white; border-radius: 5px; margin: 5px; }
+        button:hover { background: #d35400; }
+        
+        #banner-ad {
+            width: 320px; height: 50px; background: #f1c40f; color: black; 
+            margin: 10px auto; display: flex; align-items: center; justify-content: center;
+            font-weight: bold; border: 1px dashed #333;
+        }
+        #rewarded-ad-btn { background: #27ae60; }
+        
+        .info-panel { font-size: 14px; color: #bdc3c7; margin: 5px; }
+    </style>
+</head>
+
+<body>
+
+    <div class="ui-panel">
+        Очки: <span id="score">0</span> | Ходы: <span id="moves">20</span>
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+        <button id="rewarded-ad-btn" onclick="watchRewardedAd()">🎥 Смотреть рекламу (+5 ходов)</button>
+    </div>
+
+    <div class="info-panel">
+        💥 4 в ряд = Линейная бомба | 🌈 5 в ряд = Цветная бомба | 🎯 L/T форма = Областная бомба
+    </div>
+
+    <div id="banner-ad">[ РЕКЛАМНЫЙ БАННЕР 320x50 ]</div>
+
+    <script>
+        const COLS = 8, ROWS = 8, TILE_SIZE = 50;
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let board = [];
+        let score = 0;
+        let moves = 20;
+        let selectedTile = null;
+        let isProcessing = false;
+
+        const COLORS = ['#e74c3c', '#2ecc71', '#3498db', '#f1c40f', '#9b59b6'];
+        
+        const BONUS_NONE = 0;
+        const BONUS_LINE_H = 1;
+        const BONUS_LINE_V = 2;
+        const BONUS_BOMB = 3;
+        const BONUS_COLOR = 4;
+
+        function showInterstitialAd() {
+            console.log("📺 [AdMob/Yandex SDK]: Показ межстраничной рекламы");
+            alert("📺 МЕЖСТРАНИЧНАЯ РЕКЛАМА\n(Здесь будет видео или баннер на весь экран)");
+        }
+
+        function watchRewardedAd() {
+            console.log("🎥 [AdMob/Yandex SDK]: Запрос rewarded видео");
+            alert("🎥 Идет просмотр рекламы... (3 секунды)");
+            setTimeout(() => {
+                moves += 5;
+                updateUI();
+                alert("✅ Награда получена! +5 ходов.");
+            }, 1000);
+        }
+
+        function refreshBanner() {
+            console.log("🖼 [SDK]: Обновление баннера");
+        }
+
+        function initBoard() {
+            board = [];
+            for (let r = 0; r < ROWS; r++) {
+                board[r] = [];
+                for (let c = 0; c < COLS; c++) {
+                    let color;
+                    do {
+                        color = Math.floor(Math.random() * COLORS.length);
+                    } while (
+                        (c >= 2 && board[r][c-1] && board[r][c-1].color === color && board[r][c-2] && board[r][c-2].color === color) ||
+                        (r >= 2 && board[r-1][c] && board[r-1][c].color === color && board[r-2][c] && board[r-2][c].color === color)
+                    );
+                    board[r][c] = { color: color, bonus: BONUS_NONE };
+                }
+            }
+            drawBoard();
+        }
+
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const tile = board[r][c];
+                    if (tile.color !== -1) {
+                        const x = c * TILE_SIZE + TILE_SIZE/2;
+                        const y = r * TILE_SIZE + TILE_SIZE/2;
+                        
+                        ctx.fillStyle = COLORS[tile.color];
+                        ctx.beginPath();
+                        ctx.arc(x, y, TILE_SIZE/2 - 4, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        if (tile.bonus !== BONUS_NONE) {
+                            ctx.strokeStyle = "#fff";
+                            ctx.lineWidth = 3;
+                            
+                            if (tile.bonus === BONUS_LINE_H) {
+                                ctx.beginPath();
+                                ctx.moveTo(x - 15, y);
+                                ctx.lineTo(x + 15, y);
+                                ctx.stroke();
+                            } else if (tile.bonus === BONUS_LINE_V) {
+                                ctx.beginPath();
+                                ctx.moveTo(x, y - 15);
+                                ctx.lineTo(x, y + 15);
+                                ctx.stroke();
+                            } else if (tile.bonus === BONUS_BOMB) {
+                                ctx.beginPath();
+                                ctx.moveTo(x - 12, y - 12);
+                                ctx.lineTo(x + 12, y + 12);
+                                ctx.moveTo(x + 12, y - 12);
+                                ctx.lineTo(x - 12, y + 12);
+                                ctx.stroke();
+                            } else if (tile.bonus === BONUS_COLOR) {
+                                const gradient = ctx.createRadialGradient(x, y, 5, x, y, 15);
+                                gradient.addColorStop(0, '#fff');
+                                gradient.addColorStop(0.5, '#ff0');
+                                gradient.addColorStop(1, '#f0f');
+                                ctx.fillStyle = gradient;
+                                ctx.beginPath();
+                                ctx.arc(x, y, 12, 0, Math.PI * 2);
+                                ctx.fill();
+                            }
+                        }
+                        
+                        if (selectedTile && selectedTile.r === r && selectedTile.c === c) {
+                            ctx.strokeStyle = "#fff";
+                            ctx.lineWidth = 3;
+                            ctx.beginPath();
+                            ctx.arc(x, y, TILE_SIZE/2 - 2, 0, Math.PI * 2);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('score').innerText = score;
+            document.getElementById('moves').innerText = moves;
+            
+            if (moves <= 0) {
+                setTimeout(() => {
+                    showInterstitialAd();
+                    alert("Игра окончена! Ваш счет: " + score);
+                    score = 0; moves = 20;
+                    initBoard();
+                }, 100);
+            }
+        }
+
+        canvas.addEventListener('click', (e) => {
+            if (isProcessing) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const c = Math.floor(x / TILE_SIZE);
+            const r = Math.floor(y / TILE_SIZE);
+
+            if (!selectedTile) {
+                selectedTile = { r, c };
+            } else {
+                const dr = Math.abs(selectedTile.r - r);
+                const dc = Math.abs(selectedTile.c - c);
+                
+                if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+                    swapAndCheck(selectedTile.r, selectedTile.c, r, c);
+                }
+                selectedTile = null;
+            }
+            drawBoard();
+        });
+
+        async function swapAndCheck(r1, c1, r2, c2) {
+            isProcessing = true;
+            [board[r1][c1], board[r2][c2]] = [board[r2][c2], board[r1][c1]];
+            drawBoard();
+            
+            let result = findMatches();
+            if (result.matches.length > 0) {
+                moves--;
+                updateUI();
+                await processMatches();
+            } else {
+                [board[r1][c1], board[r2][c2]] = [board[r2][c2], board[r1][c1]];
+                drawBoard();
+            }
+            isProcessing = false;
+        }
+
+        function findMatches() {
+            let matches = new Set();
+            let matchGroups = [];
+            
+            for (let r = 0; r < ROWS; r++) {
+                let c = 0;
+                while (c < COLS) {
+                    if (board[r][c].color !== -1) {
+                        let color = board[r][c].color;
+                        let start = c;
+                        while (c < COLS && board[r][c].color === color) {
+                            c++;
+                        }
+                        let length = c - start;
+                        if (length >= 3) {
+                            let group = [];
+                            for (let i = start; i < c; i++) {
+                                matches.add(`${r},${i}`);
+                                group.push({ r, c: i });
+                            }
+                            matchGroups.push({ tiles: group, direction: 'horizontal', length });
+                        }
+                    } else {
+                        c++;
+                    }
+                }
+            }
+            
+            for (let c = 0; c < COLS; c++) {
+                let r = 0;
+                while (r < ROWS) {
+                    if (board[r][c].color !== -1) {
+                        let color = board[r][c].color;
+                        let start = r;
+                        while (r < ROWS && board[r][c].color === color) {
+                            r++;
+                        }
+                        let length = r - start;
+                        if (length >= 3) {
+                            let group = [];
+                            for (let i = start; i < r; i++) {
+                                matches.add(`${i},${c}`);
+                                group.push({ r: i, c });
+                            }
+                            matchGroups.push({ tiles: group, direction: 'vertical', length });
+                        }
+                    } else {
+                        r++;
+                    }
+                }
+            }
+            
+            return { matches: Array.from(matches).map(m => m.split(',').map(Number)), groups: matchGroups };
+        }
+
+        function determineBonusType(groups) {
+            let intersections = new Map();
+            
+            for (let i = 0; i < groups.length; i++) {
+                for (let j = i + 1; j < groups.length; j++) {
+                    if (groups[i].direction !== groups[j].direction) {
+                        for (let tile1 of groups[i].tiles) {
+                            for (let tile2 of groups[j].tiles) {
+                                if (tile1.r === tile2.r && tile1.c === tile2.c) {
+                                    intersections.set(`${tile1.r},${tile1.c}`, {
+                                        group1: groups[i],
+                                        group2: groups[j],
+                                        pos: tile1
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            let bonuses = [];
+            
+            for (let [key, intersection] of intersections) {
+                const totalLength = intersection.group1.length + intersection.group2.length - 1;
+                if (totalLength >= 5) {
+                    bonuses.push({
+                        pos: intersection.pos,
+                        type: BONUS_BOMB,
+                        color: board[intersection.pos.r][intersection.pos.c].color
+                    });
+                }
+            }
+            
+            for (let group of groups) {
+                let isInIntersection = false;
+                for (let [key, intersection] of intersections) {
+                    if (intersection.group1 === group || intersection.group2 === group) {
+                        isInIntersection = true;
+                        break;
+                    }
+                }
+                
+                if (!isInIntersection) {
+                    if (group.length === 5) {
+                        bonuses.push({
+                            pos: group.tiles[2],
+                            type: BONUS_COLOR,
+                            color: board[group.tiles[0].r][group.tiles[0].c].color
+                        });
+                    } else if (group.length === 4) {
+                        let bonusType = group.direction === 'horizontal' ? BONUS_LINE_H : BONUS_LINE_V;
+                        bonuses.push({
+                            pos: group.tiles[1],
+                            type: bonusType,
+                            color: board[group.tiles[0].r][group.tiles[0].c].color
+                        });
+                    }
+                }
+            }
+            
+            return bonuses;
+        }
+
+        async function activateBonus(r, c) {
+            const tile = board[r][c];
+            let tilesToRemove = new Set();
+            
+            if (tile.bonus === BONUS_LINE_H) {
+                for (let i = 0; i < COLS; i++) {
+                    tilesToRemove.add(`${r},${i}`);
+                }
+            } else if (tile.bonus === BONUS_LINE_V) {
+                for (let i = 0; i < ROWS; i++) {
+                    tilesToRemove.add(`${i},${c}`);
+                }
+            } else if (tile.bonus === BONUS_BOMB) {
+                for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                        const nr = r + dr;
+                        const nc = c + dc;
+                        if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+                            tilesToRemove.add(`${nr},${nc}`);
+                        }
+                    }
+                }
+            } else if (tile.bonus === BONUS_COLOR) {
+                const targetColor = tile.color;
+                for (let i = 0; i < ROWS; i++) {
+                    for (let j = 0; j < COLS; j++) {
+                        if (board[i][j].color === targetColor) {
+                            tilesToRemove.add(`${i},${j}`);
+                        }
+                    }
+                }
+            }
+            
+            for (let key of tilesToRemove) {
+                const [tr, tc] = key.split(',').map(Number);
+                if (board[tr][tc].bonus !== BONUS_NONE) {
+                    const subBonus = board[tr][tc].bonus;
+                    board[tr][tc].bonus = BONUS_NONE;
+                    const subTiles = await activateBonus(tr, tc);
+                    for (let subKey of subTiles) {
+                        tilesToRemove.add(subKey);
+                    }
+                }
+            }
+            
+            return tilesToRemove;
+        }
+
+        async function processMatches() {
+            let result = findMatches();
+            let matches = result.matches;
+            let groups = result.groups;
+            
+            while (matches.length > 0) {
+                let bonuses = determineBonusType(groups);
+                
+                let bonusActivations = new Set();
+                for (let [r, c] of matches) {
+                    if (board[r][c].bonus !== BONUS_NONE) {
+                        const activated = await activateBonus(r, c);
+                        for (let key of activated) {
+                            bonusActivations.add(key);
+                        }
+                    }
+                }
+                
+                let allToRemove = new Set();
+                for (let [r, c] of matches) {
+                    allToRemove.add(`${r},${c}`);
+                }
+                for (let key of bonusActivations) {
+                    allToRemove.add(key);
+                }
+                
+                for (let bonus of bonuses) {
+                    const key = `${bonus.pos.r},${bonus.pos.c}`;
+                    if (allToRemove.has(key)) {
+                        board[bonus.pos.r][bonus.pos.c] = {
+                            color: bonus.color,
+                            bonus: bonus.type
+                        };
+                        allToRemove.delete(key);
+                    }
+                }
+                
+                for (let key of allToRemove) {
+                    const [r, c] = key.split(',').map(Number);
+                    board[r][c] = { color: -1, bonus: BONUS_NONE };
+                    score += 10;
+                }
+                
+                updateUI();
+                drawBoard();
+                await sleep(200);
+                
+                for (let c = 0; c < COLS; c++) {
+                    let emptyRow = ROWS - 1;
+                    for (let r = ROWS - 1; r >= 0; r--) {
+                        if (board[r][c].color !== -1) {
+                            board[emptyRow][c] = board[r][c];
+                            if (emptyRow !== r) board[r][c] = { color: -1, bonus: BONUS_NONE };
+                            emptyRow--;
+                        }
+                    }
+                }
+                
+                for (let c = 0; c < COLS; c++) {
+                    for (let r = 0; r < ROWS; r++) {
+                        if (board[r][c].color === -1) {
+                            board[r][c] = {
+                                color: Math.floor(Math.random() * COLORS.length),
+                                bonus: BONUS_NONE
+                            };
+                        }
+                    }
+                }
+                
+                drawBoard();
+                await sleep(200);
+                
+                result = findMatches();
+                matches = result.matches;
+                groups = result.groups;
+            }
+            
+            if (score > 0 && score % 500 === 0) {
+                showInterstitialAd();
+            }
+        }
+
+        function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+        initBoard();
+        updateUI();
+    </script>
+</body>
+</html>
