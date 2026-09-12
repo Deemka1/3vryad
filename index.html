@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Match-3 с Рекламой</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #2c3e50; color: white; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
+        #game-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        canvas { background: #34495e; border: 2px solid #ecf0f1; border-radius: 8px; touch-action: none; }
+        .ui-panel { margin: 10px; font-size: 20px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #e67e22; border: none; color: white; border-radius: 5px; margin: 5px; }
+        button:hover { background: #d35400; }
+        
+        /* --- СТИЛИ ДЛЯ РЕКЛАМЫ --- */
+        #banner-ad {
+            width: 320px; height: 50px; background: #f1c40f; color: black; 
+            margin: 10px auto; display: flex; align-items: center; justify-content: center;
+            font-weight: bold; border: 1px dashed #333;
+        }
+        #rewarded-ad-btn { background: #27ae60; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-panel">
+        Очки: <span id="score">0</span> | Ходы: <span id="moves">20</span>
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+        <button id="rewarded-ad-btn" onclick="watchRewardedAd()">🎥 Смотреть рекламу (+5 ходов)</button>
+    </div>
+
+    <!-- ЗАГЛУШКА БАННЕРА -->
+    <div id="banner-ad">[ РЕКЛАМНЫЙ БАННЕР 320x50 ]</div>
+
+    <script>
+        // ==========================================
+        // 1. НАСТРОЙКИ ИГРЫ
+        // ==========================================
+        const COLS = 8, ROWS = 8, TILE_SIZE = 50;
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let board = [];
+        let score = 0;
+        let moves = 20;
+        let selectedTile = null;
+        let isProcessing = false; // Флаг для блокировки ввода во время анимаций/падений
+
+        const COLORS = ['#e74c3c', '#2ecc71', '#3498db', '#f1c40f', '#9b59b6']; // 5 цветов
+
+        // ==========================================
+        // 2. ЛОГИКА РЕКЛАМЫ (МОК-ВЕРСИЯ)
+        // ==========================================
+        
+        // Межстраничная реклама (показывается при окончании уровня/игры)
+        function showInterstitialAd() {
+            console.log("📺 [AdMob/Yandex SDK]: Показ межстраничной рекламы");
+            // В реальном коде здесь будет вызов SDK, например:
+            // ysdk.adv.showFullscreenAdv(); или admob.interstitial.show();
+            alert("📺 МЕЖСТРАНИЧНАЯ РЕКЛАМА\n(Здесь будет видео или баннер на весь экран)");
+        }
+
+        // Реклама за вознаграждение
+        function watchRewardedAd() {
+            console.log("🎥 [AdMob/Yandex SDK]: Запрос rewarded видео");
+            // В реальном коде:
+            // ysdk.adv.showRewardedVideo({ callbacks: { onRewarded: () => { moves += 5; updateUI(); } } });
+            
+            // Имитация просмотра
+            alert("🎥 Идет просмотр рекламы... (3 секунды)");
+            setTimeout(() => {
+                moves += 5;
+                updateUI();
+                alert("✅ Награда получена! +5 ходов.");
+            }, 1000);
+        }
+
+        // Обновление баннера (обычно баннер обновляется сам через SDK, но можно логировать)
+        function refreshBanner() {
+            console.log("🖼 [SDK]: Обновление баннера");
+        }
+
+        // ==========================================
+        // 3. ЛОГИКА ИГРЫ (MATCH-3)
+        // ==========================================
+
+        function initBoard() {
+            board = [];
+            for (let r = 0; r < ROWS; r++) {
+                board[r] = [];
+                for (let c = 0; c < COLS; c++) {
+                    // Генерируем цвет так, чтобы сразу не было 3 в ряд
+                    let color;
+                    do {
+                        color = Math.floor(Math.random() * COLORS.length);
+                    } while (
+                        (c >= 2 && board[r][c-1] === color && board[r][c-2] === color) ||
+                        (r >= 2 && board[r-1][c] === color && board[r-2][c] === color)
+                    );
+                    board[r][c] = color;
+                }
+            }
+            drawBoard();
+        }
+
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c] !== -1) {
+                        ctx.fillStyle = COLORS[board[r][c]];
+                        ctx.beginPath();
+                        ctx.arc(c * TILE_SIZE + TILE_SIZE/2, r * TILE_SIZE + TILE_SIZE/2, TILE_SIZE/2 - 4, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Рамка для выбранной фишки
+                        if (selectedTile && selectedTile.r === r && selectedTile.c === c) {
+                            ctx.strokeStyle = "#fff";
+                            ctx.lineWidth = 3;
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('score').innerText = score;
+            document.getElementById('moves').innerText = moves;
+            
+            if (moves <= 0) {
+                setTimeout(() => {
+                    showInterstitialAd(); // <-- ВЫЗОВ РЕКЛАМЫ ПРИ ПРОИГРЫШЕ
+                    alert("Игра окончена! Ваш счет: " + score);
+                    score = 0; moves = 20;
+                    initBoard();
+                }, 100);
+            }
+        }
+
+        // Обработка кликов
+        canvas.addEventListener('click', (e) => {
+            if (isProcessing) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const c = Math.floor(x / TILE_SIZE);
+            const r = Math.floor(y / TILE_SIZE);
+
+            if (!selectedTile) {
+                selectedTile = { r, c };
+            } else {
+                const dr = Math.abs(selectedTile.r - r);
+                const dc = Math.abs(selectedTile.c - c);
+                
+                if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+                    swapAndCheck(selectedTile.r, selectedTile.c, r, c);
+                }
+                selectedTile = null;
+            }
+            drawBoard();
+        });
+
+        async function swapAndCheck(r1, c1, r2, c2) {
+            isProcessing = true;
+            // Swap
+            [board[r1][c1], board[r2][c2]] = [board[r2][c2], board[r1][c1]];
+            drawBoard();
+            
+            let matches = findMatches();
+            if (matches.length > 0) {
+                moves--;
+                updateUI();
+                await processMatches();
+            } else {
+                // Возврат, если нет совпадений
+                [board[r1][c1], board[r2][c2]] = [board[r2][c2], board[r1][c1]];
+                drawBoard();
+            }
+            isProcessing = false;
+        }
+
+        function findMatches() {
+            let matches = new Set();
+            // Горизонтальные
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS - 2; c++) {
+                    if (board[r][c] !== -1 && board[r][c] === board[r][c+1] && board[r][c] === board[r][c+2]) {
+                        matches.add(`${r},${c}`); matches.add(`${r},${c+1}`); matches.add(`${r},${c+2}`);
+                    }
+                }
+            }
+            // Вертикальные
+            for (let c = 0; c < COLS; c++) {
+                for (let r = 0; r < ROWS - 2; r++) {
+                    if (board[r][c] !== -1 && board[r][c] === board[r+1][c] && board[r][c] === board[r+2][c]) {
+                        matches.add(`${r},${c}`); matches.add(`${r+1},${c}`); matches.add(`${r+2},${c}`);
+                    }
+                }
+            }
+            return Array.from(matches).map(m => m.split(',').map(Number));
+        }
+
+        async function processMatches() {
+            let matches = findMatches();
+            while (matches.length > 0) {
+                // Удаляем
+                matches.forEach(([r, c]) => {
+                    board[r][c] = -1;
+                    score += 10;
+                });
+                updateUI();
+                drawBoard();
+                await sleep(200); // Пауза для визуала
+
+                // Гравитация
+                for (let c = 0; c < COLS; c++) {
+                    let emptyRow = ROWS - 1;
+                    for (let r = ROWS - 1; r >= 0; r--) {
+                        if (board[r][c] !== -1) {
+                            board[emptyRow][c] = board[r][c];
+                            if (emptyRow !== r) board[r][c] = -1;
+                            emptyRow--;
+                        }
+                    }
+                }
+                // Заполнение пустот
+                for (let c = 0; c < COLS; c++) {
+                    for (let r = 0; r < ROWS; r++) {
+                        if (board[r][c] === -1) {
+                            board[r][c] = Math.floor(Math.random() * COLORS.length);
+                        }
+                    }
+                }
+                drawBoard();
+                await sleep(200);
+                matches = findMatches(); // Проверка на каскады
+            }
+            
+            // Проверка достижения цели уровня (например, 500 очков)
+            if (score > 0 && score % 500 === 0) {
+                showInterstitialAd(); // <-- ВЫЗОВ РЕКЛАМЫ ПРИ ПЕРЕХОДЕ НА НОВЫЙ УРОВЕНЬ
+            }
+        }
+
+        function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+        // Старт
+        initBoard();
+        updateUI();
+    </script>
+</body>
+</html>
